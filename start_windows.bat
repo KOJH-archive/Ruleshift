@@ -6,8 +6,8 @@ python --version >nul 2>&1
 if errorlevel 1 goto :no_python
 
 if not exist ".venv\Scripts\python.exe" goto :create_venv
-.venv\Scripts\python.exe -m pip --version >nul 2>&1
-if not errorlevel 1 goto :install_requirements
+.venv\Scripts\python.exe -c "import streamlit, requests, defusedxml, docx, bs4, dateutil, dotenv" >nul 2>&1
+if not errorlevel 1 goto :run_app
 echo [RuleShift] Repairing incomplete virtual environment...
 rmdir /s /q ".venv"
 if exist ".venv" goto :failed
@@ -20,6 +20,8 @@ if errorlevel 1 goto :failed
 :install_requirements
 python -m pip --python .venv install -r requirements.txt
 if errorlevel 1 goto :failed
+
+:run_app
 .venv\Scripts\python.exe -m streamlit run app.py
 if errorlevel 1 goto :failed
 exit /b 0

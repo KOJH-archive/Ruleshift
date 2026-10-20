@@ -138,6 +138,14 @@ class ExternalAdapterContractTests(unittest.TestCase):
         self.assertEqual(mock_get.call_args.kwargs['params']['target'],'law')
 
     @patch('ruleshift.law_api.requests.get')
+    def test_search_live_law_tag(self,mock_get):
+        mock_get.return_value.status_code=200
+        mock_get.return_value.content='''<LawSearch><law><법령일련번호>12345</법령일련번호><법령명한글>실서버 법령</법령명한글><공포일자>20261020</공포일자></law></LawSearch>'''.encode('utf-8')
+        mock_get.return_value.raise_for_status.return_value=None
+        results=LawOpenClient('valid-oc').search('실서버 법령')
+        self.assertEqual(results[0]['mst'],'12345')
+
+    @patch('ruleshift.law_api.requests.get')
     def test_body_xml_parser(self,mock_get):
         mock_get.return_value.status_code=200
         mock_get.return_value.content='''<법령><기본정보><법령명_한글>테스트법</법령명_한글><공포일자>20261020</공포일자><시행일자>20270101</시행일자></기본정보><조문><조문단위><조문번호>1</조문번호><조문제목>한도</조문제목><조문내용>제1조(한도) 채권 한도는 20퍼센트 이하로 한다.</조문내용></조문단위></조문></법령>'''.encode('utf-8')

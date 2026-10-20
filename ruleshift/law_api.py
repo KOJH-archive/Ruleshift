@@ -36,7 +36,10 @@ class LawOpenClient:
     def search(self, query: str) -> list[dict]:
         root = self._xml('lawSearch.do', {'target':'law','query':query,'display':30,'page':1,'sort':'ddes'})
         results = []
-        for elem in root.findall('.//법령'):
+        # The live API currently returns result rows as <law>; older/mock
+        # responses may use the Korean <법령> tag.
+        elems = root.findall('.//law') or root.findall('.//법령')
+        for elem in elems:
             name = _value(elem,'법령명한글','법령명_한글','법령명')
             mst = _value(elem,'법령일련번호')
             if name and mst:
