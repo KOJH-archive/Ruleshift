@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TypedDict, Any
 from .models import Document, Report, Change, Assessment
 from .compare import compare
-from .impact import assess, PROFILES
+from .impact import assess
 
 class AnalysisState(TypedDict, total=False):
     old: Document
@@ -26,10 +26,10 @@ def _laya_advisory(change: Change) -> str:
     from laya import Router
     if not hasattr(_laya_advisory,'router'):
         _laya_advisory.router = Router()
-    questions = {'area':{'type':'choice','instructions':'이 규정 개정 조항의 주요 관련 분야는?',
-                          'criteria':{'work':'채권, RP, 금융투자, 금융기관 운용 업무',
-                                      'life':'대출, 보험, 주거, 소비자 계약 및 개인정보',
-                                      'other':'그 외 분야'}}}
+    questions = {'area':{'type':'choice','instructions':'이 법령 개정 조항의 주된 변경 유형은?',
+                          'criteria':{'rights':'권리 또는 의무 변경',
+                                      'procedure':'절차 또는 기한 변경',
+                                      'other':'정의, 조직, 문구 등 그 외 변경'}}}
     answer = _laya_advisory.router.predict((change.after or change.before)[:2500], questions, model='multilingual')
     label = answer['answers']['area']['choice']
     conf = answer['answers']['area'].get('answer_confidence')
@@ -73,7 +73,7 @@ def _report(state: AnalysisState) -> dict:
 def run_analysis(old: Document, new: Document, profiles: list[str] | None=None,
                  extra_keywords: list[str] | None=None, use_laya: bool=False,
                  use_langgraph: bool=False, use_ollama: bool=False, ollama_model: str="auto") -> Report:
-    state: AnalysisState = {'old':old,'new':new,'profiles':profiles if profiles is not None else list(PROFILES),
+    state: AnalysisState = {'old':old,'new':new,'profiles':profiles if profiles is not None else [],
                             'extra_keywords':extra_keywords or [],'use_laya':use_laya,'warnings':[]}
     if use_langgraph:
         try:

@@ -10,7 +10,7 @@ SENSITIVE = ['부칙','경과','유예','예외','적용례','시행']
 
 def assess(change: Change, document: Document, profile_names: list[str] | None = None,
            extra_keywords: list[str] | None = None, laya_suggestion: str = '') -> Assessment:
-    profile_names = list(PROFILES) if profile_names is None else profile_names
+    profile_names = [] if profile_names is None else profile_names
     terms = {name: PROFILES[name] for name in profile_names if name in PROFILES}
     custom = [w.strip() for w in (extra_keywords or []) if w.strip()]
     if custom:
@@ -23,15 +23,15 @@ def assess(change: Change, document: Document, profile_names: list[str] | None =
         domain_count = sum(len(v) for v in matches.values())
         relevance = '높음' if domain_count >= 3 else '보통'
     else:
-        area, relevance = '미분류', '낮음'
+        area, relevance = '관심 키워드 미일치/미설정', '미평가'
     material = [w for w in MATERIAL if w in context]
     impact = '낮음'
-    if relevance != '낮음':
+    if relevance != '미평가':
         impact = '높음' if len(material) >= 2 or change.kind in ('삭제','신설') and material else '보통'
     if change.kind == '조문 이동/번호변경':
         impact = '낮음'  # identical body does not imply changed legal duty
-    elif relevance == '낮음' and material:
-        impact = '판단 보류'  # scope ambiguity, no assumption that it is irrelevant
+    elif relevance == '미평가':
+        impact = '판단 보류'  # no user scope; legal importance must not be guessed
     reason = f'관심 분야 일치: {", ".join(w for ws in matches.values() for w in ws[:5]) or "자동 확인되지 않음"}. '
     reason += f'검토할 표현: {", ".join(material[:5]) or "명확하지 않음"}. '
     reason += '이는 키워드 기반 1차 분류이며 법적 의무 변경의 확정 판정은 아닙니다.'
@@ -42,7 +42,7 @@ def assess(change: Change, document: Document, profile_names: list[str] | None =
         actions.append('실제 시행일 및 조항별 시행 시점 확인')
     if any(word in context for word in SENSITIVE):
         actions.append('경과규정·유예·예외 적용 여부 확인')
-    if relevance != '낮음' and change.kind != '조문 이동/번호변경':
+    if relevance != '미평가' and change.kind != '조문 이동/번호변경':
         actions.append('현재 업무 절차 또는 계약 조건과 대조')
     evidence = (change.after or change.before).strip()[:600]
     return Assessment(change, area, relevance, impact, reason, tuple(dict.fromkeys(actions)), evidence,

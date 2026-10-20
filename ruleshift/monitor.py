@@ -110,6 +110,12 @@ class MonitorStore:
         with self._conn() as db:
             return db.execute('INSERT OR IGNORE INTO events(watch_id,event_key,title,created_at,payload) VALUES(?,?,?,?,?)',
                               (watch_id,key,title,datetime.now(timezone.utc).isoformat(),safe)).rowcount==1
+    def event_id(self, key: str) -> int:
+        with self._conn() as db:
+            row=db.execute('SELECT id FROM events WHERE event_key=?',(key,)).fetchone()
+        if row is None:
+            raise LookupError('저장된 이벤트를 찾지 못했습니다.')
+        return int(row[0])
     def list_events(self, limit: int=100) -> list[dict]:
         with self._conn() as db:
             rows=db.execute('SELECT id,watch_id,title,created_at,payload,reviewed,notified FROM events ORDER BY id DESC LIMIT ?', (min(max(limit,1),500),)).fetchall()
@@ -152,17 +158,24 @@ def monitor_once(store: MonitorStore, snapshot_store: SnapshotStore, law_client=
                 if not exact: raise LookupError('일치하는 법령명 없음. 검색 조건 또는 API 응답 확인')
                 chosen=max(exact,key=lambda r:(r.get('promulgated') or '',r.get('mst') or ''))
                 version_key=chosen['mst']
-                if store.has_seen(w.id,version_key): stats['unchanged']+=1; continue
                 doc=law_client.fetch(version_key)
                 if doc.title.replace(' ','') != w.query.replace(' ',''):
                     raise ValueError('법령 API 검색명과 조회 본문명이 일치하지 않습니다.')
+                if str(doc.version) != str(version_key):
+                    raise ValueError('검색 결과와 조회한 법령 버전이 일치하지 않습니다.')
+                fingerprint=hashlib.sha256(json.dumps(
+                    [doc.version,doc.text,doc.effective_date,doc.published_date],
+                    ensure_ascii=False).encode('utf-8')).hexdigest()
+                if store.has_seen(w.id,fingerprint): stats['unchanged']+=1; continue
                 old_versions=snapshot_store.list_versions(doc.title)
                 previous=old_versions[0] if old_versions else None
-                # Save before seen, enabling recovery on partial errors; comparison remains deterministic.
-                snapshot_store.save(doc)
+                # Do not advance the baseline before analysis/event persistence succeeds.
+                # Otherwise a failed analysis makes the next poll compare the new
+                # version against itself and silently lose the amendment event.
                 metadata_changed = (previous is not None and
                     (previous.effective_date != doc.effective_date or previous.published_date != doc.published_date))
-                if previous and (previous.text != doc.text or metadata_changed) and not first_poll:
+                version_changed=previous is not None and previous.version != doc.version
+                if previous and (previous.text != doc.text or metadata_changed or version_changed) and not first_poll:
                     report=run_analysis(previous,doc,use_laya=use_laya,use_langgraph=use_langgraph,
                                         use_ollama=use_ollama,ollama_model=ollama_model)
                     if metadata_changed:
@@ -171,12 +184,14 @@ def monitor_once(store: MonitorStore, snapshot_store: SnapshotStore, law_client=
                              'stage':doc.stage,'report':report.to_dict(), 'verified':False,
                              'metadata_changed':metadata_changed,
                              'applicability':store.applicability(w.id)}
-                    k=_event_key(w,version_key)
+                    k=_event_key(w,fingerprint)
                     if store.record_event(w.id,k,doc.title,payload):
                         stats['new_events']+=1
+                        stats['new_event_ids'].append(store.event_id(k))
                 else:
                     stats['seeded']+=int(first_poll)
-                store.record_seen(w.id,version_key)
+                snapshot_store.save(doc)
+                store.record_seen(w.id,fingerprint)
             elif w.kind in ('fsc','fsc_final'):
                 if fsc_client is None: fsc_client=FSCNoticeClient()
                 if fsc_final_client is None: fsc_final_client=FSCFinalClient()
@@ -207,14 +222,14 @@ def monitor_once(store: MonitorStore, snapshot_store: SnapshotStore, law_client=
                              'report':report.to_dict(),'verified':False,
                              'content_complete':bool(n.text),
                              'applicability':store.applicability(w.id)}
-                    if store.record_event(w.id,_event_key(w,n.notice_id),n.title,payload):
+                    k=_event_key(w,n.notice_id)
+                    if store.record_event(w.id,k,n.title,payload):
                         stats['new_events']+=1
+                        stats['new_event_ids'].append(store.event_id(k))
                     store.record_seen(w.id,n.notice_id)
             else: raise ValueError('지원되지 않는 소스')
         except Exception as e:
             detail=f'watch #{w.id} ({w.kind}/{w.query}): {type(e).__name__}: {str(e)[:180]}'
             store.log_error(w.id,detail)
             stats['errors'].append(detail)
-    events=store.list_events(500)
-    stats['new_event_ids']=[e['id'] for e in events if not e['notified']]
     return stats

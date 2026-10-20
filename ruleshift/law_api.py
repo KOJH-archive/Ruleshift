@@ -1,6 +1,4 @@
-"""Opt-in adaptor for the Korean Ministry of Government Legislation's published Law Open API.
-Network calls require a real OC token and were not tested in this build environment.
-"""
+"""Official Korean law search and complete article extraction."""
 from __future__ import annotations
 from urllib.parse import quote
 import requests
@@ -16,6 +14,18 @@ def _value(el, *names) -> str:
             return result.strip()
     return ''
 
+
+def _content(el) -> str:
+    """Preserve text within inline XML markup without inheriting sibling sections."""
+    return ' '.join(''.join(el.itertext()).split()) if el is not None else ''
+
+
+def _article_lines(article) -> list[str]:
+    # 조문내용 is usually only the introduction. 항/호/목 are separate nested nodes.
+    return [value for node in article.iter()
+            if node.tag in {'조문내용', '항내용', '호내용', '목내용'}
+            if (value := _content(node))]
+
 class LawOpenClient:
     def __init__(self, oc: str):
         if not oc or oc.lower() == 'test':
@@ -23,9 +33,15 @@ class LawOpenClient:
         self.oc = oc
 
     def _xml(self, path: str, params: dict) -> ET.Element:
-        response = requests.get(ENDPOINT+path, params={'OC':self.oc,'type':'XML',**params}, timeout=25,
-                                headers={'User-Agent':'RuleShiftMVP/0.1 (personal research)'})
-        response.raise_for_status()
+        try:
+            response = requests.get(ENDPOINT+path, params={'OC':self.oc,'type':'XML',**params}, timeout=25,
+                                    allow_redirects=False,
+                                    headers={'User-Agent':'RuleShiftMVP/0.1 (personal research)'})
+        except requests.RequestException:
+            # requests exceptions can embed the request URL, including the OC value.
+            raise RuntimeError('법령 API 연결에 실패했습니다. 네트워크 상태를 확인하세요.') from None
+        if not 200 <= response.status_code < 300:
+            raise RuntimeError(f'법령 API HTTP {response.status_code} 응답. OC 및 서비스 상태를 확인하세요.')
         if len(response.content) > 8 * 1024 * 1024:
             raise ValueError('법령 원문 응답 제한(8MB) 초과')
         root = ET.fromstring(response.content)
@@ -47,7 +63,7 @@ class LawOpenClient:
                                 'effective':_value(elem,'시행일자'),'type':_value(elem,'법령구분명')})
         return results
 
-    def fetch(self, mst: str, stage: str='내부문서/미확인') -> Document:
+    def fetch(self, mst: str, stage: str='공포/고시') -> Document:
         if not str(mst).isdigit():
             raise ValueError('법령일련번호(MST)는 숫자여야 합니다.')
         root = self._xml('lawService.do', {'target':'law','MST':str(mst)})
@@ -61,7 +77,8 @@ class LawOpenClient:
             title = _value(article,'조문제목')
             num = _value(article,'조문번호')
             subnum = _value(article,'조문가지번호')
-            full_text = _value(article,'조문내용')
+            lines = _article_lines(article)
+            full_text = '\n'.join(lines)
             if not full_text and not num:
                 continue
             # Often the official 조문내용 contains the full article heading. Avoid double headings.
@@ -74,10 +91,24 @@ class LawOpenClient:
                 if title and title not in heading:
                     heading += f'({title})'
                 pieces.append(heading+'\n'+full_text)
-        for side in root.findall('.//부칙단위'):
-            data = _value(side,'부칙내용')
+        for index, side in enumerate(root.findall('.//부칙단위'), 1):
+            data = _content(side.find('부칙내용'))
             if data:
-                pieces.append('부칙\n'+data)
+                issued = _value(side, '부칙공포일자', '공포일자')
+                number = _value(side, '부칙공포번호', '공포번호')
+                identity = '-'.join(x for x in (issued, number) if x) or str(index)
+                # Official 부칙내용 may itself start with "부칙". Keep it as body,
+                # not a second synthetic section heading for the text parser.
+                pieces.append(f'부칙({identity})\n원문: {data}')
+        for index, annex in enumerate(root.findall('.//별표단위'), 1):
+            data = _content(annex.find('별표내용'))
+            if data:
+                number = _value(annex, '별표번호') or str(index)
+                branch = _value(annex, '별표가지번호')
+                kind = _value(annex, '별표구분')
+                identity = '-'.join(x for x in (kind, number, branch) if x)
+                title = _value(annex, '별표제목')
+                pieces.append(f'별표({identity})\n{title}\n원문: {data}')
         if not pieces:
             raise RuntimeError('공식 API 응답에서 조문이 추출되지 않았습니다. 원문 확인 필요.')
         published = _value(root,'.//공포일자')

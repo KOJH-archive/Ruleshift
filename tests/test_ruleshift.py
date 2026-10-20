@@ -57,10 +57,17 @@ class CompareTests(unittest.TestCase):
         with self.assertRaises(ValueError):compare(make('기준',title='가'),make('내용',title='나'))
 
 class ImpactTests(unittest.TestCase):
+    def test_generic_analysis_never_assumes_user_field(self):
+        old=make('제1조(의무)\n신고하여야 한다.',title='일반법')
+        new=make('제1조(의무)\n등록하여야 한다.',title='일반법',version='2')
+        assessment=run_analysis(old,new).assessments[0]
+        self.assertEqual(assessment.relevance,'미평가')
+        self.assertEqual(assessment.impact,'판단 보류')
+
     def test_rp_high_and_review(self):
         old=make('제1조(운용 비율)\n채권 운용비율 한도는 35퍼센트 이하로 한다.',title='RP 지침')
         new=make('제1조(운용 비율)\n채권 운용비율 한도는 30퍼센트 이하로 한다.',title='RP 지침',version='2')
-        a=run_analysis(old,new).assessments[0]
+        a=run_analysis(old,new,profiles=['금융·채권·RP 업무']).assessments[0]
         self.assertEqual(a.relevance,'높음')
         self.assertEqual(a.impact,'높음')
         self.assertTrue(a.review_required)
@@ -154,7 +161,41 @@ class ExternalAdapterContractTests(unittest.TestCase):
         self.assertEqual(doc.title,'테스트법')
         self.assertIn('채권 한도',doc.text)
         self.assertFalse(doc.verified)
-        self.assertEqual(doc.stage,'내부문서/미확인')
+        self.assertEqual(doc.stage,'공포/고시')
+
+    @patch('ruleshift.law_api.requests.get')
+    def test_nested_official_sections_are_compared_without_false_article_additions(self, mock_get):
+        from ruleshift.compare import compare
+        def xml(changed: bool) -> bytes:
+            ending = '개정' if changed else '종전'
+            new_side = ('<부칙단위><부칙공포일자>20260908</부칙공포일자>'
+                        '<부칙공포번호>99</부칙공포번호><부칙내용>부칙 제1조(시행일) 2027년부터 시행한다.</부칙내용></부칙단위>') if changed else ''
+            return (f'<법령><기본정보><법령명_한글>일반법</법령명_한글></기본정보><조문>'
+                    f'<조문단위><조문번호>1</조문번호><조문내용>제1조(목적)</조문내용>'
+                    f'<항><항내용>① {ending} 목적</항내용><호><호내용>1. {ending} 세부 기준</호내용>'
+                    f'<목><목내용>가. {ending} 목록</목내용></목></호></항></조문단위>'
+                    f'<조문단위><조문번호>2</조문번호><조문내용>제2조(정의) 동일</조문내용></조문단위>'
+                    f'</조문><부칙><부칙단위><부칙공포일자>20240101</부칙공포일자>'
+                    f'<부칙공포번호>1</부칙공포번호><부칙내용>부칙 제1조(시행일) 기존 내용</부칙내용>'
+                    f'</부칙단위>{new_side}</부칙></법령>').encode('utf-8')
+        mock_get.return_value.status_code=200
+        mock_get.return_value.content=xml(False)
+        before=LawOpenClient('valid-oc').fetch('100')
+        mock_get.return_value.content=xml(True)
+        after=LawOpenClient('valid-oc').fetch('101')
+        self.assertIn('세부 기준', after.text)
+        self.assertIn('목록', after.text)
+        changes=compare(before,after)
+        self.assertEqual([(c.kind,c.clause_id) for c in changes],
+                         [('수정','제1조'),('신설','부칙(20260908-99)')])
+
+    @patch('ruleshift.law_api.requests.get')
+    def test_request_failure_never_exposes_oc(self, mock_get):
+        import requests
+        mock_get.side_effect=requests.ConnectionError('URL contains private-oc-value')
+        with self.assertRaises(RuntimeError) as error:
+            LawOpenClient('private-oc-value').search('일반법')
+        self.assertNotIn('private-oc-value',str(error.exception))
 
     def test_markdown_report(self):
         old=make('제1조(한도)\n채권 운용비율 한도는 35퍼센트 이하로 한다.')

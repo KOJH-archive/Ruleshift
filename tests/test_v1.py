@@ -112,6 +112,29 @@ class MonitorTests(unittest.TestCase):
         self.assertEqual(len(self.store.list_events()),1)
         self.store.mark_reviewed(self.store.list_events()[0]['id'])
         self.assertTrue(self.store.list_events()[0]['reviewed'])
+    def test_same_mst_corrected_text_is_detected_once(self):
+        self.store.add_watch('law','금융투자업규정')
+        class CorrectedLaw(MockLaw):
+            content='초기'
+            def fetch(self,mst):
+                return Document('금융투자업규정',f'제1조(내용)\n{self.content}',mst)
+        law=CorrectedLaw()
+        self.assertEqual(monitor_once(self.store,self.snaps,law_client=law)['seeded'],1)
+        law.content='수정'
+        result=monitor_once(self.store,self.snaps,law_client=law)
+        self.assertEqual(result['new_events'],1)
+        self.assertEqual(len(result['new_event_ids']),1)
+        self.assertEqual(monitor_once(self.store,self.snaps,law_client=law)['new_event_ids'],[])
+    def test_analysis_error_does_not_consume_new_version(self):
+        self.store.add_watch('law','금융투자업규정')
+        law=MockLaw()
+        monitor_once(self.store,self.snaps,law_client=law)
+        law.version='101'
+        with patch('ruleshift.monitor.run_analysis', side_effect=RuntimeError('temporary failure')):
+            failed=monitor_once(self.store,self.snaps,law_client=law)
+        self.assertTrue(failed['errors'])
+        self.assertEqual(self.snaps.list_versions('금융투자업규정')[0].version,'100')
+        self.assertEqual(monitor_once(self.store,self.snaps,law_client=law)['new_events'],1)
     def test_fsc_baseline_seed_and_second_notice_alert(self):
         self.store.add_watch('fsc','금융투자업규정')
         client=MockFSC()

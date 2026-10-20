@@ -2,7 +2,6 @@
 from __future__ import annotations
 import json
 import os
-from datetime import date
 from pathlib import Path
 import streamlit as st
 from dotenv import load_dotenv
@@ -11,12 +10,8 @@ from ruleshift.workflow import run_analysis
 from ruleshift.storage import SnapshotStore
 from ruleshift.parser import parse_bytes
 from ruleshift.reporting import markdown_report
-from ruleshift.impact import PROFILES
 from ruleshift.applicability import evaluate_applicability
 from ruleshift.monitor import MonitorStore, monitor_once
-from ruleshift.quant import load_positions_csv, simulate_limit, simulate_loan_rate
-from ruleshift.notify import send_ntfy
-from ruleshift.number_extract import limit_suggestions
 
 ROOT=Path(__file__).resolve().parent
 load_dotenv(ROOT/'.env')
@@ -25,10 +20,10 @@ WATCH_DB=ROOT/'data'/'monitor.sqlite3'
 store=SnapshotStore(DB)
 ms=MonitorStore(WATCH_DB)
 
-st.set_page_config(page_title='RuleShift | Regulatory Impact Radar',page_icon='⚖️',layout='wide')
-st.title('⚖️ RuleShift | 규정 변경 영향 레이더')
-st.caption('법령·금융위 예고·내부 규정 비교 / 근거 중심 영향검토 / 로컬 우선 / 거래·계약 자동 변경 없음')
-st.info('검토 보조 도구입니다. 법적 적용대상·시행일·경과규정과 실제 포트폴리오 규정은 사람이 확인해야 합니다. 샘플은 모두 가상입니다.')
+st.set_page_config(page_title='RuleShift | 법령 개정 감시',page_icon='⚖️',layout='wide')
+st.title('⚖️ RuleShift | 법령 개정 감시')
+st.caption('관심 법령의 새 버전 탐지 · 조문/부칙 비교 · 근거와 출처를 검토함에 저장')
+st.info('특정 분야를 전제하지 않습니다. 변경 사실과 법적 적용 여부는 다르므로 시행일·경과규정은 원문에서 확인하세요.')
 
 with st.sidebar:
     st.markdown('### 실행 환경')
@@ -43,7 +38,7 @@ with st.sidebar:
         ollama_model=st.text_input('Ollama 모델명',value=os.getenv('OLLAMA_MODEL','auto'))
         st.caption('auto/current이면 현재 로드 모델을 우선 사용하고, 없으면 로컬 설치 모델 중 최근 모델을 자동 선택합니다.')
 
-page_dashboard,page_watch,page_compare,page_simulate,page_help=st.tabs(['📌 변경·검토함','🔔 자동 감시','⚖️ 문서 비교','🧮 영향 시뮬레이션','🔧 설정·제약'])
+page_dashboard,page_watch,page_compare,page_help=st.tabs(['📌 변경·검토함','🔔 자동 감시','⚖️ 문서 비교','🔧 설정·제약'])
 
 with page_dashboard:
     events=ms.list_events(150)
@@ -73,7 +68,7 @@ with page_dashboard:
                     ms.mark_reviewed(e['id'],not e['reviewed']);st.rerun()
     with st.expander('최근 자동 감시 오류'):
         errors=ms.errors()
-        if errors:st.dataframe(errors,use_container_width=True,hide_index=True)
+        if errors:st.dataframe(errors,hide_index=True)
         else:st.caption('기록된 오류 없음')
 
 with page_watch:
@@ -81,7 +76,7 @@ with page_watch:
     st.caption('최초 조회는 기준 스냅샷만 저장합니다. 이후 새 버전·공고가 발견되면 검토함에 기록합니다. 수집 실패 시 0건으로 간주하지 않습니다.')
     with st.form('newwatch'):
         kind=st.selectbox('감시 출처',['law','fsc','fsc_final'],format_func=lambda x:({'law':'법제처 법령 (정확한 법령명)','fsc':'금융위 입법·규정변경예고','fsc_final':'금융위 고시·공고·훈령'}[x]))
-        query=st.text_input('법령명 또는 관심 키워드',value='자본시장과 금융투자업에 관한 법률' if kind=='law' else '금융투자업규정')
+        query=st.text_input('법령명 또는 관심 키워드',value='',placeholder='정확한 법령명 또는 게시판 검색어')
         keywords=st.text_input('금융위 추가 키워드 (선택, 쉼표 구분)',value='')
         submitted=st.form_submit_button('감시 목록에 등록')
     if submitted:
@@ -98,7 +93,7 @@ with page_watch:
     with st.expander('사용자 프로필 · 관심 감시 조건 관리'):
         current_profile=ms.load_profile()
         profile_input=st.text_area('로컬 저장할 업무·생활 프로필 JSON',
-                                   value=json.dumps(current_profile or {'department':'채권운용','book':'RP'},ensure_ascii=False,indent=2),height=115)
+                                   value=json.dumps(current_profile,ensure_ascii=False,indent=2),height=115)
         if st.button('로컬 프로필 저장'):
             try:
                 obj=json.loads(profile_input)
@@ -132,23 +127,14 @@ with page_watch:
         if results['errors']:st.error('일부 수집 실패. 하단 로그를 확인하세요.')
         elif results['new_events']:st.success('새로운 변경 이벤트를 검토함에 저장했습니다.')
         else:st.info('새 이벤트 없음 또는 첫 기준 데이터 수집.')
-    st.divider()
-    st.write('**휴대폰 알림 (선택)**')
-    ntfy_topic=st.text_input('ntfy 구독 토픽 (12자 이상)',value=os.getenv('NTFY_TOPIC',''),type='password')
-    st.caption('휴대폰 ntfy 앱에서 동일한 토픽을 구독하세요. 공개 ntfy 서버에는 민감한 원문을 전송하지 않습니다.')
-    unsent=[e for e in ms.list_events(500) if not e['notified']]
-    if st.button(f'미발송 {len(unsent)}건 알림 보내기',disabled=not unsent):
-        try:
-            send_ntfy(ntfy_topic,'법령·규정 변경',len(unsent),os.getenv('NTFY_BASE_URL','https://ntfy.sh'),os.getenv('NTFY_TOKEN',''))
-            ms.mark_notified([e['id'] for e in unsent]);st.success('알림 서버 접수 완료 (휴대폰 수신은 별도 확인)')
-        except Exception as e:st.error('알림 실패: '+str(e))
+    st.caption('변경 정보는 이 PC의 검토함에 저장됩니다. 외부 휴대폰 알림은 기본 사용하지 않습니다.')
 
 with page_compare:
     st.subheader('조문 단위 비교·관련성 분석')
+    profile_names=[]
     with st.form('compareconfig'):
-        profile_names=st.multiselect('분석 관심 분야',list(PROFILES),default=list(PROFILES))
-        extra=st.text_input('추가 관심 키워드',value='RP, 채권, 운용비율')
-        user_profile_raw=st.text_area('내 적용 조건 (JSON, 선택)',value='{"department":"채권운용", "book":"RP"}',height=85)
+        extra=st.text_input('관심 키워드 (선택, 쉼표 구분)',value='',help='비워도 모든 변경 조문을 표시합니다.')
+        user_profile_raw=st.text_area('내 적용 조건 (JSON, 선택)',value='{}',height=85)
         conditions_raw=st.text_area('해당 규정에 대한 적용 조건 (JSON, 선택)',value='{}',height=75,
                                     help='예: {"department":"채권운용"}; 정확히 일치하는지 1차 검사만 합니다.')
         config_ok=st.form_submit_button('프로필 조건 확인')
@@ -159,7 +145,7 @@ with page_compare:
             ap=evaluate_applicability(prof,cond)
             st.info(f'적용 조건 검사: {ap.status}; 정보 부족: {", ".join(ap.missing) or "없음"}. 법적 적용 확정이 아닙니다.')
         except Exception as e:st.error('조건 오류: '+str(e))
-    mode=st.radio('데이터 선택',['가상 예제','파일 업로드','공식 법령 API'],horizontal=True)
+    mode=st.radio('데이터 선택',['가상 예제','파일 업로드','공식 법령 API'],index=2,horizontal=True)
     old=new=None
     if mode=='가상 예제':
         cases={'RP 운용비율 한도 가상 변경':'rp_limit','대출 수수료 가상 변경':'loan_terms','개인정보 보존기간 가상 변경':'privacy'}
@@ -187,26 +173,38 @@ with page_compare:
     else:
         st.caption('국가법령정보 API OC가 필요합니다. 검색 결과는 현행 목록일 수 있으니 서로 다른 버전인지 직접 확인하세요.')
         oc=st.text_input('LAW_OC (화면에 저장하지 않음)',value=os.getenv('LAW_OC',''),type='password')
-        query=st.text_input('법령 검색',value='자본시장과 금융투자업에 관한 법률')
+        query=st.text_input('법령 검색',value='',placeholder='예: 개인정보 보호법')
         if st.button('공식 법령 검색'):
             try:
+                if len(query.strip()) < 2:
+                    raise ValueError('검색할 법령명을 2자 이상 입력하세요.')
                 from ruleshift.law_api import LawOpenClient
                 st.session_state['law_results']=LawOpenClient(oc).search(query)
+                st.session_state['law_query']=query
+                st.session_state.pop('official_docs',None)
+                st.session_state.pop('official_selection',None)
             except Exception as e:st.error(str(e))
-        candidates=st.session_state.get('law_results',[])
+        candidates=st.session_state.get('law_results',[]) if st.session_state.get('law_query')==query else []
         if candidates:
-            label=lambda r:f"{r['title']} / MST {r['mst']} / 공포 {r['promulgated']}"
-            old_i=st.selectbox('이전 버전',range(len(candidates)),format_func=lambda i:label(candidates[i]))
-            new_i=st.selectbox('개정 버전',range(len(candidates)),index=min(1,len(candidates)-1),format_func=lambda i:label(candidates[i]))
+            label=lambda r:f"{r['title']} / MST {r['mst']} / 공포 {r['promulgated']} / 시행 {r['effective']}"
+            old_i=st.selectbox('이전 버전',range(len(candidates)),index=min(1,len(candidates)-1),format_func=lambda i:label(candidates[i]))
+            new_i=st.selectbox('개정 버전',range(len(candidates)),index=0,format_func=lambda i:label(candidates[i]))
             if st.button('두 원문 조회'):
                 try:
+                    if old_i==new_i:
+                        raise ValueError('서로 다른 두 버전을 선택하세요.')
+                    if candidates[old_i]['title'] != candidates[new_i]['title']:
+                        raise ValueError('같은 법령의 두 버전을 선택하세요.')
                     from ruleshift.law_api import LawOpenClient
                     client=LawOpenClient(oc)
                     st.session_state['official_docs']=(client.fetch(candidates[old_i]['mst']),client.fetch(candidates[new_i]['mst']))
+                    st.session_state['official_selection']=(candidates[old_i]['mst'],candidates[new_i]['mst'])
                 except Exception as e:st.error(str(e))
-        if 'official_docs' in st.session_state: old,new=st.session_state['official_docs']
+        if (candidates and 'official_docs' in st.session_state and
+                st.session_state.get('official_selection')==(candidates[old_i]['mst'],candidates[new_i]['mst'])):
+            old,new=st.session_state['official_docs']
     if old and new:
-        if st.button('변경 영향 분석 실행',type='primary',use_container_width=True):
+        if st.button('개정 내용 비교 실행',type='primary',width='stretch'):
             try:
                 rpt=run_analysis(old,new,profile_names,[x.strip() for x in extra.split(',') if x.strip()],
                                  use_laya,use_graph,use_ollama,ollama_model)
@@ -236,14 +234,6 @@ with page_compare:
                     note=rpt.ollama_notes[c.clause_id]
                     st.write('**Ollama 보조 설명 (법적 결론 아님)**',note['analysis'])
                     st.code('원문 확인된 인용: '+note['source_quote'])
-        proposals=limit_suggestions(rpt)
-        if proposals:
-            st.markdown('**한도 변화 숫자 후보 (자동 법령 해석 아님)**')
-            st.dataframe(proposals,use_container_width=True,hide_index=True)
-            choice=st.selectbox('RP 시나리오에 제안할 조문',range(len(proposals)),format_func=lambda i:proposals[i]['clause_id'])
-            if st.button('숫자 후보를 RP 시뮬레이터로 보내기 (확인 후 실행)'):
-                st.session_state['rp_limit_proposal']=proposals[choice]
-                st.success('시뮬레이션 탭에서 제안값을 확인한 뒤 분석을 실행하세요.')
         j=json.dumps(rpt.to_dict(),ensure_ascii=False,indent=2)
         st.download_button('JSON 다운로드',j,'ruleshift_report.json','application/json')
         st.download_button('Markdown 보고서',markdown_report(rpt),'ruleshift_review.md','text/markdown')
@@ -252,53 +242,16 @@ with page_compare:
             count=int(store.save(a))+int(store.save(b))
             st.success(f'새 스냅샷 {count}개 저장했습니다.')
 
-with page_simulate:
-    st.subheader('법령·지침 변경의 정량 영향 실험실')
-    st.warning('개정 조문에서 자동 추정한 법적 한도가 아닙니다. 사용자가 직접 확인한 값만 입력하세요. 어떠한 주문·운용 변경도 실행하지 않습니다.')
-    simulation=st.radio('계산 유형',['RP 채권 만기구간 편입비율','대출 금리 변경에 따른 단순 이자'],horizontal=True)
-    if simulation=='RP 채권 만기구간 편입비율':
-        st.markdown('**포지션 CSV** · 필수 열: `security_id,maturity_date,market_value_krw` (기준일 현재 원화 평가금액)')
-        uploaded=st.file_uploader('채권 포트폴리오 CSV (원본 대신 가명화 권장)',type=['csv'],key='portfolio')
-        example=(ROOT/'examples'/'portfolio_sample.csv').read_bytes()
-        st.download_button('가상 포지션 CSV 예제',example,'portfolio_sample.csv','text/csv')
-        c1,c2,c3=st.columns(3)
-        base_date=c1.date_input('기준일',value=date.today())
-        proposal=st.session_state.get('rp_limit_proposal',{})
-        if proposal:st.warning(f"{proposal['clause_id']}에서 추출한 후보값. 법령 시행·분모·적용 대상 미확인: {proposal['old_pct']}% → {proposal['new_pct']}%")
-        oldlim=c2.number_input('이전 한도 (%)',0.0,100.0,float(proposal.get('old_pct',35.0)),0.5)
-        newlim=c3.number_input('변경 한도 (%)',0.0,100.0,float(proposal.get('new_pct',30.0)),0.5)
-        a,b=st.columns(2)
-        minmonths=a.number_input('구간 시작 개월 수 (포함)',0,360,6)
-        maxmonths=b.number_input('구간 종료 개월 수 (포함)',1,1200,60)
-        if st.button('정적 포트폴리오 영향 계산',type='primary'):
-            try:
-                positions=load_positions_csv((uploaded.getvalue() if uploaded else example).decode('utf-8-sig'))
-                st.session_state['rp_sim']=simulate_limit(positions,base_date,oldlim,newlim,minmonths,maxmonths)
-            except Exception as e:st.error(str(e))
-        if 'rp_sim' in st.session_state:
-            st.dataframe(st.session_state['rp_sim'],use_container_width=True,hide_index=True)
-            st.caption('6개월 및 5년 경계값은 포함, 미래 만기상환된 종목은 제외, 포트폴리오 신규매매/가격변동/현금 유입은 무시')
-            st.download_button('계산결과 JSON',json.dumps(st.session_state['rp_sim'],ensure_ascii=False,indent=2),'rp_scenario.json')
-    else:
-        c1,c2,c3,c4=st.columns(4)
-        principal=c1.number_input('대출잔액 (원)',min_value=0.0,value=100000000.0,step=1000000.0)
-        oldrate=c2.number_input('기존 연 금리(%)',value=4.0,step=0.1)
-        newrate=c3.number_input('변경 연 금리(%)',value=4.5,step=0.1)
-        days=c4.number_input('계산 일수',1,366,30)
-        if st.button('단순 이자차액 계산'):
-            try:st.json(simulate_loan_rate(principal,oldrate,newrate,days))
-            except Exception as e:st.error(str(e))
-
 with page_help:
     st.subheader('연동 설정 및 제약')
     st.markdown('''**운영 원칙**
 - 기본 실행은 무료·로컬이며 외부 LLM 호출을 하지 않습니다.
 - 법제처 OC 인증값은 `.env`에 `LAW_OC=...`로 지정합니다. 최초 기준 버전 저장 후 다음 조회부터 개정 이벤트가 생성됩니다.
 - 금융위 게시판은 **규정변경예고 게시물**을 감시하는 것이며, 첨부 개정조문 전체를 정식 법령으로 확정하지 않습니다.
-- ntfy 모바일 알림은 앱에서 토픽 구독이 필요하며, 공개 서버 사용 시 민감한 원문은 전송하지 않습니다.
+- 외부 모바일 알림은 기본 비활성입니다. 검토함은 이 PC의 로컬 SQLite에 저장됩니다.
 - 무인 감시는 앱이 아니라 별도 `python -m ruleshift monitor` 명령을 Windows 작업 스케줄러/cron에서 실행하도록 구성했습니다.
 - LAYA는 분류 참고, Ollama는 원문 인용 검증된 설명 참고, LangGraph는 단계별 실행에 사용합니다. 설치되지 않으면 비활성 상태입니다.
 - 법제처/금융위 실서버, 모바일 수신, Ollama 모델 실행은 각 환경의 인증·네트워크·설치가 필요합니다.
 - **적용 대상과 시행 여부는 자동으로 법적 확정 판정하지 않습니다.**''')
-    st.code('python -m ruleshift monitor --notify\npython -m ruleshift demo --case rp_limit --laya --langgraph',language='powershell')
+    st.code('python -m ruleshift watch add --kind law --query "정확한 법령명"\npython -m ruleshift monitor\npython -m ruleshift events',language='powershell')
     st.caption('상세 설정 및 Windows 작업 스케줄러 등록법: README.md / scripts/install_daily_task.ps1')

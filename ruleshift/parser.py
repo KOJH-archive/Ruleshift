@@ -2,7 +2,7 @@ from __future__ import annotations
 import re
 from .models import Clause
 
-ARTICLE = re.compile(r'(?m)^\s*(제\s*\d+\s*조(?:\s*의\s*\d+)?(?:\([^\n)]{1,150}\))?|부\s*칙(?:\([^\n)]{1,100}\))?)\s*')
+ARTICLE = re.compile(r'(?m)^\s*(제\s*\d+\s*조(?:\s*의\s*\d+)?(?:\([^\n)]{1,150}\))?|부\s*칙(?:\([^\n)]{1,100}\))?|별\s*표(?:\([^\n)]{1,100}\))?)\s*')
 ARTICLE_ID = re.compile(r'(제\s*\d+\s*조(?:\s*의\s*\d+)?)')
 
 def clean(text: str) -> str:
@@ -19,13 +19,23 @@ def parse_clauses(text: str) -> list[Clause]:
     if prefix:
         out.append(Clause('전문', '서문·기본정보', prefix))
     counts: dict[str,int] = {}
+    in_attachment = False
     for idx, match in enumerate(matches):
         heading = clean(match.group(1))
-        base_match = ARTICLE_ID.search(heading)
-        base = re.sub(r'\s+', '', base_match.group(1)) if base_match else '부칙'
+        base_match = ARTICLE_ID.match(heading)
+        # Internal 제1조 headings within a 부칙/별표 belong to that section.
+        if in_attachment and base_match:
+            continue
+        if not base_match:
+            in_attachment = True
+        base = re.sub(r'\s+', '', base_match.group(1)) if base_match else heading.replace(' ', '')
         counts[base] = counts.get(base, 0) + 1
         identifier = f'{base}#{counts[base]}' if counts[base] > 1 else base
-        end = matches[idx+1].start() if idx+1 < len(matches) else len(text)
+        next_index = idx + 1
+        if not base_match:
+            while next_index < len(matches) and ARTICLE_ID.match(matches[next_index].group(1)):
+                next_index += 1
+        end = matches[next_index].start() if next_index < len(matches) else len(text)
         body = text[match.end():end].strip()
         out.append(Clause(identifier, heading, body))
     return out
