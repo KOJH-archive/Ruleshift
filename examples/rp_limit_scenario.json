@@ -1,0 +1,72 @@
+[
+  {
+    "as_of": "2026-10-20",
+    "months_ahead": 0,
+    "position_count": 5,
+    "bucket_value_krw": 73000000000.0,
+    "total_value_krw": 103000000000.0,
+    "bucket_weight_pct": 70.87378640776699,
+    "old_limit_pct": 35.0,
+    "new_limit_pct": 30.0,
+    "old_excess_krw": 36950000000.0,
+    "new_excess_krw": 42100000000.0,
+    "difference_excess_krw": 5150000000.0,
+    "note": "신규매매/가격변동/조달·담보·회계분류를 고려하지 않은 정적 스냅샷 가정. 한도 분모·편입대상·경계값은 사용자 확인."
+  },
+  {
+    "as_of": "2026-11-20",
+    "months_ahead": 1,
+    "position_count": 5,
+    "bucket_value_krw": 73000000000.0,
+    "total_value_krw": 103000000000.0,
+    "bucket_weight_pct": 70.87378640776699,
+    "old_limit_pct": 35.0,
+    "new_limit_pct": 30.0,
+    "old_excess_krw": 36950000000.0,
+    "new_excess_krw": 42100000000.0,
+    "difference_excess_krw": 5150000000.0,
+    "note": "신규매매/가격변동/조달·담보·회계분류를 고려하지 않은 정적 스냅샷 가정. 한도 분모·편입대상·경계값은 사용자 확인."
+  },
+  {
+    "as_of": "2027-01-20",
+    "months_ahead": 3,
+    "position_count": 5,
+    "bucket_value_krw": 47000000000.0,
+    "total_value_krw": 103000000000.0,
+    "bucket_weight_pct": 45.63106796116505,
+    "old_limit_pct": 35.0,
+    "new_limit_pct": 30.0,
+    "old_excess_krw": 10950000000.0,
+    "new_excess_krw": 16100000000.0,
+    "difference_excess_krw": 5150000000.0,
+    "note": "신규매매/가격변동/조달·담보·회계분류를 고려하지 않은 정적 스냅샷 가정. 한도 분모·편입대상·경계값은 사용자 확인."
+  },
+  {
+    "as_of": "2027-04-20",
+    "months_ahead": 6,
+    "position_count": 4,
+    "bucket_value_krw": 47000000000.0,
+    "total_value_krw": 85000000000.0,
+    "bucket_weight_pct": 55.294117647058826,
+    "old_limit_pct": 35.0,
+    "new_limit_pct": 30.0,
+    "old_excess_krw": 17250000000.0,
+    "new_excess_krw": 21500000000.0,
+    "difference_excess_krw": 4250000000.0,
+    "note": "신규매매/가격변동/조달·담보·회계분류를 고려하지 않은 정적 스냅샷 가정. 한도 분모·편입대상·경계값은 사용자 확인."
+  },
+  {
+    "as_of": "2027-10-20",
+    "months_ahead": 12,
+    "position_count": 3,
+    "bucket_value_krw": 47000000000.0,
+    "total_value_krw": 59000000000.0,
+    "bucket_weight_pct": 79.66101694915254,
+    "old_limit_pct": 35.0,
+    "new_limit_pct": 30.0,
+    "old_excess_krw": 26350000000.0,
+    "new_excess_krw": 29300000000.0,
+    "difference_excess_krw": 2950000000.0,
+    "note": "신규매매/가격변동/조달·담보·회계분류를 고려하지 않은 정적 스냅샷 가정. 한도 분모·편입대상·경계값은 사용자 확인."
+  }
+]
