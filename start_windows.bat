@@ -10,6 +10,13 @@ if errorlevel 1 (
   set "PYTHON_EXE=py"
   set "PYTHON_ARGS=-3.11"
 )
+if exist ".venv\Scripts\python.exe" (
+  .venv\Scripts\python.exe -m pip --version >nul 2>nul
+  if errorlevel 1 (
+    echo [RuleShift] Repairing incomplete virtual environment...
+    rmdir /s /q ".venv"
+  )
+)
 if not exist ".venv\Scripts\python.exe" (
   echo [RuleShift] Creating virtual environment...
   %PYTHON_EXE% %PYTHON_ARGS% -m venv --without-pip .venv
