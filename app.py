@@ -40,8 +40,8 @@ with st.sidebar:
         use_laya=st.checkbox('LAYA 참고 분류',value=False,help='설치 및 다국어 체크포인트 다운로드 필요')
         use_graph=st.checkbox('LangGraph 실행 경로',value=False,help='langgraph 패키지 설치 필요')
         use_ollama=st.checkbox('Ollama 로컬 설명 생성',value=False,help='로컬 Ollama 서버와 설치된 모델 필요')
-        ollama_model=st.text_input('Ollama 모델명',value=os.getenv('OLLAMA_MODEL','qwen2.5:7b'))
-        st.caption('모델이 실패하면 경고를 기록하고 기본 로직으로 복귀합니다. 생성 설명은 원문 직접 인용을 검사합니다.')
+        ollama_model=st.text_input('Ollama 모델명',value=os.getenv('OLLAMA_MODEL','auto'))
+        st.caption('auto/current이면 현재 로드 모델을 우선 사용하고, 없으면 로컬 설치 모델 중 최근 모델을 자동 선택합니다.')
 
 page_dashboard,page_watch,page_compare,page_simulate,page_help=st.tabs(['📌 변경·검토함','🔔 자동 감시','⚖️ 문서 비교','🧮 영향 시뮬레이션','🔧 설정·제약'])
 

@@ -72,7 +72,7 @@ def _report(state: AnalysisState) -> dict:
 
 def run_analysis(old: Document, new: Document, profiles: list[str] | None=None,
                  extra_keywords: list[str] | None=None, use_laya: bool=False,
-                 use_langgraph: bool=False, use_ollama: bool=False, ollama_model: str="qwen2.5:7b") -> Report:
+                 use_langgraph: bool=False, use_ollama: bool=False, ollama_model: str="auto") -> Report:
     state: AnalysisState = {'old':old,'new':new,'profiles':profiles if profiles is not None else list(PROFILES),
                             'extra_keywords':extra_keywords or [],'use_laya':use_laya,'warnings':[]}
     if use_langgraph:
